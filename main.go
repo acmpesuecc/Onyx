@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/dgraph-io/badger/v4"
 	"strings"
+	"sync"
 )
 
 type Graph struct {
@@ -159,7 +160,7 @@ func DeserializeEdgeMap(serializedMap []byte) map[string]bool {
 }
 
 func main() {
-	graph, err := NewGraph("/tmp/foo", false)
+	graph, err := NewGraph("", true)
 	if err != nil {
 		panic(err)
 	}
@@ -173,16 +174,71 @@ func main() {
 	}
 
 	a_n, err := graph.GetNeighbors("a", nil)
-	if err != nil {
-		panic(err)
-	}
 	fmt.Println(a_n)
 
-	graph.RemoveEdge("a", "b", nil)
+	fmt.Println("Checking Concurrency")
+	wg := sync.WaitGroup{}
 
-	a_n, err = graph.GetNeighbors("a", nil)
-	if err != nil {
-		panic(err)
-	}
+	wg.Add(1)
+	go func() {
+		txn1 := graph.db.NewTransaction(true)
+		defer txn1.Discard()
+
+		graph.RemoveEdge("a", "b", txn1)
+		a_n, _ = graph.GetNeighbors("a", txn1)
+		fmt.Println(a_n)
+
+		i := 1
+		err := txn1.Commit()
+		for err == badger.ErrConflict && i < 10 {
+			fmt.Println("[First] Retry Commit #", i)
+
+			txn1 = graph.db.NewTransaction(true)
+			defer txn1.Discard()
+
+			graph.RemoveEdge("a", "b", txn1)
+
+			err = txn1.Commit()
+			i++
+		}
+
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		wg.Done()
+	}()
+
+	wg.Add(1)
+	go func() {
+		txn2 := graph.db.NewTransaction(true)
+		defer txn2.Discard()
+
+		graph.RemoveEdge("a", "c", txn2)
+		a_n, _ = graph.GetNeighbors("a", txn2)
+		fmt.Println(a_n)
+
+		i := 1
+		err := txn2.Commit()
+		for err == badger.ErrConflict && i < 10 {
+			fmt.Println("[Second] Retry Commit #", i)
+
+			txn2 = graph.db.NewTransaction(true)
+			defer txn2.Discard()
+
+			graph.RemoveEdge("a", "c", txn2)
+			
+			err = txn2.Commit()
+			i++
+		}
+
+		if err != nil {
+			fmt.Println(err)
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
+	a_n, _ = graph.GetNeighbors("a", nil)
 	fmt.Println(a_n)
 }
