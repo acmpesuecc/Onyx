@@ -1,9 +1,10 @@
-package main
+package Onyx
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"github.com/dgraph-io/badger/v4"
-	"strings"
 	"sync"
 )
 
@@ -49,12 +50,19 @@ func (g *Graph) AddEdge(from string, to string, txn *badger.Txn) error {
 		if err != nil {
 			return err
 		}
-		dstNodes = DeserializeEdgeMap(valCopy)
+		dstNodes, err = DeserializeEdgeMap(valCopy)
+		if err != nil {
+			return err
+		}
 	}
 
 	dstNodes[to] = true
 
-	err = txn.Set([]byte(from), SerializeEdgeMap(dstNodes))
+	serializedEdgeMap, err := SerializeEdgeMap(dstNodes)
+	if err != nil {
+		return err
+	}
+	err = txn.Set([]byte(from), serializedEdgeMap)
 	if err != nil {
 		return err
 	}
@@ -86,10 +94,17 @@ func (g *Graph) RemoveEdge(from string, to string, txn *badger.Txn) error {
 		return err
 	}
 
-	dstNodes := DeserializeEdgeMap(valCopy)
+	dstNodes, err := DeserializeEdgeMap(valCopy)
+	if err != nil {
+		return err
+	}
 	delete(dstNodes, to)
 
-	err = txn.Set([]byte(from), SerializeEdgeMap(dstNodes))
+	serializedEdgeMap, err := SerializeEdgeMap(dstNodes)
+	if err != nil {
+		return err
+	}
+	err = txn.Set([]byte(from), serializedEdgeMap)
 	if err != nil {
 		return err
 	}
@@ -128,35 +143,25 @@ func (g *Graph) GetEdges(from string, txn *badger.Txn) (map[string]bool, error) 
 		return nil, err
 	}
 
-	neighbors := DeserializeEdgeMap(valCopy)
-	return neighbors, nil
+	neighbors, err := DeserializeEdgeMap(valCopy)
+	return neighbors, err
 }
 
-func SerializeEdgeMap(m map[string]bool) []byte {
-	serializedMap := ""
-	for k, v := range m {
-		if v {
-			serializedMap += k + "|"
-		}
-	}
-	return []byte(serializedMap)
+func SerializeEdgeMap(m map[string]bool) ([]byte, error) {
+	b := new(bytes.Buffer)
+	e := gob.NewEncoder(b)
+	err := e.Encode(m)
+	return b.Bytes(), err
 }
 
-func DeserializeEdgeMap(serializedMap []byte) map[string]bool {
+func DeserializeEdgeMap(serializedMap []byte) (map[string]bool, error) {
+	b := bytes.NewBuffer(serializedMap)
+	d := gob.NewDecoder(b)
+
 	deserializedMap := make(map[string]bool)
-
-	// Split the string by '|' to get a slice of strings
-	slice := strings.Split(string(serializedMap), "|")
-
-	// The last element will be an empty string due to the trailing '|', so remove it
-	if slice[len(slice)-1] == "" {
-		slice = slice[:len(slice)-1]
-	}
-
-	for _, v := range slice {
-		deserializedMap[v] = true
-	}
-	return deserializedMap
+	// Decoding the serialized data
+	err := d.Decode(deserializedMap)
+	return deserializedMap, err
 }
 
 func main() {
