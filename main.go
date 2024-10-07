@@ -104,7 +104,7 @@ func (g *Graph) RemoveEdge(from string, to string, txn *badger.Txn) error {
 	return nil
 }
 
-func (g *Graph) GetNeighbors(from string, txn *badger.Txn) (map[string]bool, error) {
+func (g *Graph) GetEdges(from string, txn *badger.Txn) (map[string]bool, error) {
 	localTxn := txn == nil
 	if localTxn {
 		txn = g.db.NewTransaction(false)
@@ -167,14 +167,18 @@ func main() {
 
 	err = graph.AddEdge("a", "b", nil)
 	err = graph.AddEdge("a", "c", nil)
-	err = graph.AddEdge("a", "d", nil)
+	err = graph.AddEdge("c", "d", nil)
+	err = graph.AddEdge("c", "e", nil)
 
 	if err != nil {
 		panic(err)
 	}
 
-	a_n, err := graph.GetNeighbors("a", nil)
-	fmt.Println(a_n)
+	a_n, err := graph.GetEdges("a", nil)
+	fmt.Println("Neighbors of a: ", a_n)
+
+	a_n, err = graph.GetEdges("c", nil)
+	fmt.Println("Neighbors of c: ", a_n)
 
 	fmt.Println("Checking Concurrency")
 	wg := sync.WaitGroup{}
@@ -185,8 +189,8 @@ func main() {
 		defer txn1.Discard()
 
 		graph.RemoveEdge("a", "b", txn1)
-		a_n, _ = graph.GetNeighbors("a", txn1)
-		fmt.Println(a_n)
+		a_n, _ = graph.GetEdges("a", txn1)
+		fmt.Println("Neighbors of a: ", a_n)
 
 		i := 1
 		err := txn1.Commit()
@@ -214,9 +218,9 @@ func main() {
 		txn2 := graph.db.NewTransaction(true)
 		defer txn2.Discard()
 
-		graph.RemoveEdge("a", "c", txn2)
-		a_n, _ = graph.GetNeighbors("a", txn2)
-		fmt.Println(a_n)
+		graph.RemoveEdge("c", "e", txn2)
+		a_n, _ = graph.GetEdges("c", txn2)
+		fmt.Println("Neighbors of c: ", a_n)
 
 		i := 1
 		err := txn2.Commit()
@@ -226,8 +230,8 @@ func main() {
 			txn2 = graph.db.NewTransaction(true)
 			defer txn2.Discard()
 
-			graph.RemoveEdge("a", "c", txn2)
-			
+			graph.RemoveEdge("c", "e", txn2)
+
 			err = txn2.Commit()
 			i++
 		}
@@ -239,6 +243,8 @@ func main() {
 	}()
 
 	wg.Wait()
-	a_n, _ = graph.GetNeighbors("a", nil)
-	fmt.Println(a_n)
+	a_n, _ = graph.GetEdges("a", nil)
+	fmt.Println("Neighbors of a: ", a_n)
+	c_n, _ := graph.GetEdges("c", nil)
+	fmt.Println("Neighbors of c: ", c_n)
 }
