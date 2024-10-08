@@ -148,7 +148,7 @@ func (g *Graph) GetEdges(from string, txn *badger.Txn) (map[string]bool, error) 
 	return neighbors, err
 }
 
-func (g *Graph) IterAllEdges(f func(iterator *badger.Item) error, prefetchSize int, txn *badger.Txn) error {
+func (g *Graph) IterAllEdges(f func(src string, dst string) error, prefetchSize int, txn *badger.Txn) error {
 	localTxn := txn == nil
 	if localTxn {
 		txn = g.DB.NewTransaction(false)
@@ -161,10 +161,25 @@ func (g *Graph) IterAllEdges(f func(iterator *badger.Item) error, prefetchSize i
 	defer it.Close()
 	for it.Rewind(); it.Valid(); it.Next() {
 		item := it.Item()
-		err := f(item)
+		src := string(item.Key())
+
+		serVal, err := item.ValueCopy(nil)
 		if err != nil {
 			return err
 		}
+		neighbors, err := deserializeEdgeMap(serVal)
+		if err != nil {
+			return err
+		}
+
+		for neighbor, _ := range neighbors {
+			err = f(src, neighbor)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
 	}
 
 	if localTxn {
