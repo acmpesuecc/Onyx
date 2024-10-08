@@ -148,32 +148,32 @@ func (g *Graph) GetEdges(from string, txn *badger.Txn) (map[string]bool, error) 
 	return neighbors, err
 }
 
-func (g *Graph) GetAllEdges(txn *badger.Txn) (map[string]bool, error) {
+func (g *Graph) IterAllEdges(f func(iterator *badger.Item) error, prefetchSize int, txn *badger.Txn) error {
 	localTxn := txn == nil
 	if localTxn {
 		txn = g.DB.NewTransaction(false)
 		defer txn.Discard()
 	}
 
-	item, err := txn.Get([]byte(from))
-	if err != nil {
-		return nil, err
-	}
-
-	if localTxn {
-		err = txn.Commit()
+	opts := badger.DefaultIteratorOptions
+	opts.PrefetchSize = prefetchSize
+	it := txn.NewIterator(opts)
+	defer it.Close()
+	for it.Rewind(); it.Valid(); it.Next() {
+		item := it.Item()
+		err := f(item)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	valCopy, err := item.ValueCopy(nil)
-	if err != nil {
-		return nil, err
+	if localTxn {
+		err := txn.Commit()
+		if err != nil {
+			return nil
+		}
 	}
-
-	neighbors, err := deserializeEdgeMap(valCopy)
-	return neighbors, err
+	return nil
 }
 
 func serializeEdgeMap(m map[string]bool) ([]byte, error) {
