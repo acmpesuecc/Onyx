@@ -8,8 +8,9 @@ import (
 	"sync"
 )
 
+// TODO: Add Label support for edgess
 type Graph struct {
-	db *badger.DB
+	DB *badger.DB
 }
 
 func NewGraph(path string, inMemory bool) (*Graph, error) {
@@ -26,13 +27,13 @@ func NewGraph(path string, inMemory bool) (*Graph, error) {
 }
 
 func (g *Graph) Close() {
-	g.db.Close()
+	g.DB.Close()
 }
 
 func (g *Graph) AddEdge(from string, to string, txn *badger.Txn) error {
 	localTxn := txn == nil
 	if localTxn {
-		txn = g.db.NewTransaction(true)
+		txn = g.DB.NewTransaction(true)
 		defer txn.Discard()
 	}
 
@@ -50,7 +51,7 @@ func (g *Graph) AddEdge(from string, to string, txn *badger.Txn) error {
 		if err != nil {
 			return err
 		}
-		dstNodes, err = DeserializeEdgeMap(valCopy)
+		dstNodes, err = deserializeEdgeMap(valCopy)
 		if err != nil {
 			return err
 		}
@@ -58,7 +59,7 @@ func (g *Graph) AddEdge(from string, to string, txn *badger.Txn) error {
 
 	dstNodes[to] = true
 
-	serializedEdgeMap, err := SerializeEdgeMap(dstNodes)
+	serializedEdgeMap, err := serializeEdgeMap(dstNodes)
 	if err != nil {
 		return err
 	}
@@ -80,7 +81,7 @@ func (g *Graph) AddEdge(from string, to string, txn *badger.Txn) error {
 func (g *Graph) RemoveEdge(from string, to string, txn *badger.Txn) error {
 	localTxn := txn == nil
 	if localTxn {
-		txn = g.db.NewTransaction(true)
+		txn = g.DB.NewTransaction(true)
 		defer txn.Discard()
 	}
 
@@ -94,13 +95,13 @@ func (g *Graph) RemoveEdge(from string, to string, txn *badger.Txn) error {
 		return err
 	}
 
-	dstNodes, err := DeserializeEdgeMap(valCopy)
+	dstNodes, err := deserializeEdgeMap(valCopy)
 	if err != nil {
 		return err
 	}
 	delete(dstNodes, to)
 
-	serializedEdgeMap, err := SerializeEdgeMap(dstNodes)
+	serializedEdgeMap, err := serializeEdgeMap(dstNodes)
 	if err != nil {
 		return err
 	}
@@ -122,7 +123,7 @@ func (g *Graph) RemoveEdge(from string, to string, txn *badger.Txn) error {
 func (g *Graph) GetEdges(from string, txn *badger.Txn) (map[string]bool, error) {
 	localTxn := txn == nil
 	if localTxn {
-		txn = g.db.NewTransaction(false)
+		txn = g.DB.NewTransaction(false)
 		defer txn.Discard()
 	}
 
@@ -143,18 +144,46 @@ func (g *Graph) GetEdges(from string, txn *badger.Txn) (map[string]bool, error) 
 		return nil, err
 	}
 
-	neighbors, err := DeserializeEdgeMap(valCopy)
+	neighbors, err := deserializeEdgeMap(valCopy)
 	return neighbors, err
 }
 
-func SerializeEdgeMap(m map[string]bool) ([]byte, error) {
+func (g *Graph) GetAllEdges(txn *badger.Txn) (map[string]bool, error) {
+	localTxn := txn == nil
+	if localTxn {
+		txn = g.DB.NewTransaction(false)
+		defer txn.Discard()
+	}
+
+	item, err := txn.Get([]byte(from))
+	if err != nil {
+		return nil, err
+	}
+
+	if localTxn {
+		err = txn.Commit()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	valCopy, err := item.ValueCopy(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	neighbors, err := deserializeEdgeMap(valCopy)
+	return neighbors, err
+}
+
+func serializeEdgeMap(m map[string]bool) ([]byte, error) {
 	b := new(bytes.Buffer)
 	e := gob.NewEncoder(b)
 	err := e.Encode(m)
 	return b.Bytes(), err
 }
 
-func DeserializeEdgeMap(serializedMap []byte) (map[string]bool, error) {
+func deserializeEdgeMap(serializedMap []byte) (map[string]bool, error) {
 	b := bytes.NewBuffer(serializedMap)
 	d := gob.NewDecoder(b)
 
@@ -190,7 +219,7 @@ func main() {
 
 	wg.Add(1)
 	go func() {
-		txn1 := graph.db.NewTransaction(true)
+		txn1 := graph.DB.NewTransaction(true)
 		defer txn1.Discard()
 
 		graph.RemoveEdge("a", "b", txn1)
@@ -202,7 +231,7 @@ func main() {
 		for err == badger.ErrConflict && i < 10 {
 			fmt.Println("[First] Retry Commit #", i)
 
-			txn1 = graph.db.NewTransaction(true)
+			txn1 = graph.DB.NewTransaction(true)
 			defer txn1.Discard()
 
 			graph.RemoveEdge("a", "b", txn1)
@@ -220,7 +249,7 @@ func main() {
 
 	wg.Add(1)
 	go func() {
-		txn2 := graph.db.NewTransaction(true)
+		txn2 := graph.DB.NewTransaction(true)
 		defer txn2.Discard()
 
 		graph.RemoveEdge("c", "e", txn2)
@@ -232,7 +261,7 @@ func main() {
 		for err == badger.ErrConflict && i < 10 {
 			fmt.Println("[Second] Retry Commit #", i)
 
-			txn2 = graph.db.NewTransaction(true)
+			txn2 = graph.DB.NewTransaction(true)
 			defer txn2.Discard()
 
 			graph.RemoveEdge("c", "e", txn2)
