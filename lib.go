@@ -151,6 +151,14 @@ func (g *Graph) GetEdges(from string, txn *badger.Txn) (map[string]bool, error) 
 	return neighbors, err
 }
 
+func (g *Graph) OutDegree(from string, txn *badger.Txn) (int, error) {
+	dstNodes, err := g.GetEdges(from, txn)
+	if err != nil {
+		return 0, err
+	}
+	return len(dstNodes), nil
+}
+
 func (g *Graph) IterAllEdges(f func(src string, dst string) error, prefetchSize int, txn *badger.Txn) error {
 	localTxn := txn == nil
 	if localTxn {
@@ -194,23 +202,34 @@ func (g *Graph) IterAllEdges(f func(src string, dst string) error, prefetchSize 
 	return nil
 }
 
-func (g *Graph) PickRandomVertex() (string, error) {
+func (g *Graph) PickRandomVertex(txn *badger.Txn) (string, error) {
+	localTxn := txn == nil
+	if localTxn {
+		txn = g.DB.NewTransaction(false)
+		defer txn.Discard()
+	}
+
 	keys := make([][]byte, 0)
-	err := g.DB.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		it := txn.NewIterator(opts)
-		defer it.Close()
-		c := 0
-		for it.Rewind(); it.Valid() && c < 1000; it.Next() {
-			item := it.Item()
-			k := item.Key()
-			keys = append(keys, k)
-			c++
+	opts := badger.DefaultIteratorOptions
+	opts.PrefetchValues = false
+	it := txn.NewIterator(opts)
+	defer it.Close()
+	c := 0
+	for it.Rewind(); it.Valid() && c < 1000; it.Next() {
+		item := it.Item()
+		k := item.Key()
+		keys = append(keys, k)
+		c++
+	}
+
+	if localTxn {
+		err := txn.Commit()
+		if err != nil {
+			return "", nil
 		}
-		return nil
-	})
-	return string(keys[rand.Intn(len(keys))]), err
+	}
+
+	return string(keys[rand.Intn(len(keys))]), nil
 }
 
 func (g *Graph) PickRandomVertexIncorrectEfficient() (string, error) {
