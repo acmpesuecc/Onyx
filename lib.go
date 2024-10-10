@@ -286,7 +286,7 @@ func deserializeEdgeMap(serializedMap []byte) (map[string]bool, error) {
 
 	deserializedMap := make(map[string]bool)
 	// Decoding the serialized data
-	err := d.Decode(deserializedMap)
+	err := d.Decode(&deserializedMap)
 	return deserializedMap, err
 }
 
