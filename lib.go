@@ -2,9 +2,12 @@ package Onyx
 
 import (
 	"bytes"
+	"context"
 	"encoding/gob"
 	"fmt"
 	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/ristretto/z"
+	"math/rand"
 	"sync"
 )
 
@@ -189,6 +192,66 @@ func (g *Graph) IterAllEdges(f func(src string, dst string) error, prefetchSize 
 		}
 	}
 	return nil
+}
+
+func (g *Graph) PickRandomVertex() (string, error) {
+	keys := make([][]byte, 0)
+	err := g.DB.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+		c := 0
+		for it.Rewind(); it.Valid() && c < 1000; it.Next() {
+			item := it.Item()
+			k := item.Key()
+			keys = append(keys, k)
+			c++
+		}
+		return nil
+	})
+	return string(keys[rand.Intn(len(keys))]), err
+}
+
+func (g *Graph) PickRandomVertexIncorrectEfficient() (string, error) {
+	var keys []string
+	count := 0
+	stream := g.DB.NewStream()
+	stream.NumGo = 16
+
+	// overide stream.KeyToList as we only want keys. Also
+	// we can take only first version for the key.
+	stream.KeyToList = nil
+	//stream.KeyToList = func(key []byte, itr *badger.Iterator) (*pb.KVList, error) {
+	//	l := &pb.KVList{}
+	//	// Since stream framework copies the item's key while calling
+	//	// KeyToList, we can directly append key to list.
+	//	l.Kv = append(l.Kv, &pb.KV{Key: key})
+	//	return l, nil
+	//}
+
+	// The bigger the sample size, the more randomness in the outcome.
+	sampleSize := 1000
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream.Send = func(buf *z.Buffer) error {
+		if count >= sampleSize {
+			cancel()
+			return nil
+		}
+
+		_ = string(buf.Bytes())
+		keys = append(keys, fmt.Sprintf("%d", count))
+		count++
+		return nil
+	}
+
+	if err := stream.Orchestrate(ctx); err != nil && err != context.Canceled {
+		return "", err
+	}
+
+	fmt.Print(keys)
+	return keys[rand.Intn(len(keys))], nil
 }
 
 func serializeEdgeMap(m map[string]bool) ([]byte, error) {
