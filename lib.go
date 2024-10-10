@@ -221,6 +221,7 @@ func (g *Graph) PickRandomVertex(txn *badger.Txn) (string, error) {
 		keys = append(keys, k)
 		c++
 	}
+	it.Close()
 
 	if localTxn {
 		err := txn.Commit()
