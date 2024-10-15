@@ -4,6 +4,8 @@ Onyx is a embedded, on-disk, concurrent graph database which is built over [badg
 - ACID compliant
 - Serializable Snapshot Isolation (SSI) guarentee
 
+**Note:** If you are a contributer, please read [CONTRIBUTING.md](https://github.com/acmpesuecc/Onyx/blob/main/CONTRIBUTING.md)
+
 # Installation 
 To install the latest version:
 ```bash
