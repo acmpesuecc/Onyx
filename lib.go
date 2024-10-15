@@ -8,7 +8,6 @@ import (
 	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/ristretto/z"
 	"math/rand"
-	"sync"
 )
 
 // TODO: Add Label support for edgess
@@ -289,94 +288,4 @@ func deserializeEdgeMap(serializedMap []byte) (map[string]bool, error) {
 	// Decoding the serialized data
 	err := d.Decode(&deserializedMap)
 	return deserializedMap, err
-}
-
-func main() {
-	graph, err := NewGraph("", true)
-	if err != nil {
-		panic(err)
-	}
-
-	err = graph.AddEdge("a", "b", nil)
-	err = graph.AddEdge("a", "c", nil)
-	err = graph.AddEdge("c", "d", nil)
-	err = graph.AddEdge("c", "e", nil)
-
-	if err != nil {
-		panic(err)
-	}
-
-	a_n, err := graph.GetEdges("a", nil)
-	fmt.Println("Neighbors of a: ", a_n)
-
-	a_n, err = graph.GetEdges("c", nil)
-	fmt.Println("Neighbors of c: ", a_n)
-
-	fmt.Println("Checking Concurrency")
-	wg := sync.WaitGroup{}
-
-	wg.Add(1)
-	go func() {
-		txn1 := graph.DB.NewTransaction(true)
-		defer txn1.Discard()
-
-		graph.RemoveEdge("a", "b", txn1)
-		a_n, _ = graph.GetEdges("a", txn1)
-		fmt.Println("Neighbors of a: ", a_n)
-
-		i := 1
-		err := txn1.Commit()
-		for err == badger.ErrConflict && i < 10 {
-			fmt.Println("[First] Retry Commit #", i)
-
-			txn1 = graph.DB.NewTransaction(true)
-			defer txn1.Discard()
-
-			graph.RemoveEdge("a", "b", txn1)
-
-			err = txn1.Commit()
-			i++
-		}
-
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		wg.Done()
-	}()
-
-	wg.Add(1)
-	go func() {
-		txn2 := graph.DB.NewTransaction(true)
-		defer txn2.Discard()
-
-		graph.RemoveEdge("c", "e", txn2)
-		a_n, _ = graph.GetEdges("c", txn2)
-		fmt.Println("Neighbors of c: ", a_n)
-
-		i := 1
-		err := txn2.Commit()
-		for err == badger.ErrConflict && i < 10 {
-			fmt.Println("[Second] Retry Commit #", i)
-
-			txn2 = graph.DB.NewTransaction(true)
-			defer txn2.Discard()
-
-			graph.RemoveEdge("c", "e", txn2)
-
-			err = txn2.Commit()
-			i++
-		}
-
-		if err != nil {
-			fmt.Println(err)
-		}
-		wg.Done()
-	}()
-
-	wg.Wait()
-	a_n, _ = graph.GetEdges("a", nil)
-	fmt.Println("Neighbors of a: ", a_n)
-	c_n, _ := graph.GetEdges("c", nil)
-	fmt.Println("Neighbors of c: ", c_n)
 }
