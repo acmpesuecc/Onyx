@@ -35,3 +35,20 @@ if localTxn {
 The above 2 code blocks implement local transactions.  
 - `<IsRW?>` is `true` for functions which write to the graph (like `AddEdge`, `RemoveEdge`) and creates a Read-Write transaction.  
 - `<IsRW?>` is `false` for functions which only read from the graph (like `GetEdges`, `IterAllEdges`) and creates a Read-Write transaction. 
+
+## Internals
+All the data of the graph is stored in
+```go
+type Graph struct {
+	DB *badger.DB
+}
+```
+ie a singular DB attribute which is a pointer to a badgerdb kv store, which as promised in the README is the underlying data structure which stores the graph and gives us all the nice features that Onyx can claim. badger requires the key and value to be of type `[]byte` ie a arbitary byte array with us having to take care of all the serialization and deserialization to whatever types we need
+
+- The graph is stored in the badger key value store as a series of edge lists for every source node.
+- An edge list is a list of all the destination nodes `dst` for a particular source node `src` for which the edge `src->dst` exists in the graph.
+- In the Onyx codebase, this edgelist is represented as a `map[string]bool` where the `string` is the destination node in the edge list and the `bool` is arbitary. This is because go does not have a native set data structure. A `map` has been used instead of a slice as it allows us to check if a particular dst node exists in the edge list in O(1) tiem instead of traversing a list. If a key with the dest node exists in the map, it exisst in the edgelist and vice versa.
+
+So here is how it works, we store KV pairs in badger where:
+- **Key** is the source node of the edge. It is a `string` which is converted to `[]byte` and back using the simple `string()` and `[]byte()`
+- **Value** is the edge list for the source node that is the Key. The Edge List is a `map[string]bool` as explained above and is serialized to `[]byte` and back using `gob`
