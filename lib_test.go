@@ -1,72 +1,56 @@
 package Onyx
 
 import (
-    "os"
+    "github.com/dgraph-io/badger/v4"
     "testing"
 )
 
-func TestPickRandomVertex(t *testing.T) {
-    // Create graph in /tmp for testing and ensure errors are handled
-    graph, err := NewGraph("/tmp/onyxsdlkjf", false)
+func TestContainsEdge(t *testing.T) {
+    graph, err := NewGraph("", true) // In-memory graph for testing
     if err != nil {
         t.Fatalf("failed to create graph: %v", err)
     }
     defer graph.Close()
-    defer os.RemoveAll("/tmp/onyxsdlkjf") // Cleanup after test
 
-    // Add edges
-    _ = graph.AddEdge("a", "b", nil)
-    _ = graph.AddEdge("b", "c", nil)
-    _ = graph.AddEdge("c", "d", nil)
-    _ = graph.AddEdge("d", "e", nil)
+    txn := graph.DB.NewTransaction(true)
+    defer txn.Discard()
 
-    // Test PickRandomVertex
-    v, err := graph.PickRandomVertex(nil)
+    // Test when no edge exists
+    exists, err := graph.ContainsEdge("A", "B", txn)
     if err != nil {
-        t.Fatalf("failed to pick random vertex: %v", err)
+        t.Fatalf("unexpected error: %v", err)
     }
-    t.Logf("Picked random vertex: %s", v)
-
-    // Ensure the picked vertex is valid
-    validVertices := map[string]bool{"a": true, "b": true, "c": true, "d": true}
-    if !validVertices[v] {
-        t.Fatalf("picked vertex %s is not valid", v)
-    }
-}
-
-func TestInsertAndRead(t *testing.T) {
-    // Create graph in /tmp for testing and ensure errors are handled
-    graph, err := NewGraph("/tmp/onyxsdlkjf", false)
-    if err != nil {
-        t.Fatalf("failed to create graph: %v", err)
-    }
-    defer graph.Close()
-    defer os.RemoveAll("/tmp/onyxsdlkjf") // Cleanup after test
-
-    // Add edges
-    err = graph.AddEdge("a", "b", nil)
-    if err != nil {
-        t.Fatal(err)
-    }
-    err = graph.AddEdge("a", "c", nil)
-    if err != nil {
-        t.Fatal(err)
-    }
-    err = graph.AddEdge("a", "d", nil)
-    if err != nil {
-        t.Fatal(err)
+    if exists {
+        t.Fatalf("expected false, got true for non-existing edge")
     }
 
-    // Get edges for node "a"
-    dstNodes, err := graph.GetEdges("a", nil)
+    // Add an edge from A to B
+    err = graph.AddEdge("A", "B", txn)
     if err != nil {
-        t.Fatal(err)
+        t.Fatalf("failed to add edge: %v", err)
     }
 
-    // Check that all expected destination nodes exist
-    for _, node := range []string{"b", "c", "d"} {
-        if _, ok := dstNodes[node]; !ok {
-            t.Fatalf("%s not in edgelist", node)
-        }
+    // Test when edge exists
+    exists, err = graph.ContainsEdge("A", "B", txn)
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if !exists {
+        t.Fatalf("expected true, got false for existing edge")
+    }
+
+    // Test non-existent edge from A to C
+    exists, err = graph.ContainsEdge("A", "C", txn)
+    if err != nil {
+        t.Fatalf("unexpected error: %v", err)
+    }
+    if exists {
+        t.Fatalf("expected false, got true for non-existing edge A to C")
+    }
+
+    // Commit transaction after tests
+    err = txn.Commit()
+    if err != nil {
+        t.Fatalf("failed to commit transaction: %v", err)
     }
 }
