@@ -6,6 +6,8 @@ Onyx is a embedded, on-disk, concurrent graph database which is built over [badg
 
 **Note:** If you are a contributer, please read [CONTRIBUTING.md](https://github.com/acmpesuecc/Onyx/blob/main/CONTRIBUTING.md)
 
+**Please contact me at +91 8618950413 for any help/queries/assistance**
+
 # Installation 
 To install the latest version:
 ```bash
