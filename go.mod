@@ -1,4 +1,4 @@
-module github.com/Dynaclo/Onyx
+module github.com/acmpesuecc/Onyx
 
 go 1.22.4
 
