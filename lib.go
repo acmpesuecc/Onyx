@@ -131,6 +131,9 @@ func (g *Graph) GetEdges(from string, txn *badger.Txn) (map[string]bool, error) 
 
 	item, err := txn.Get([]byte(from))
 	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return make(map[string]bool), nil
+		}
 		return nil, err
 	}
 
