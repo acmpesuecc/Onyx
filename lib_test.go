@@ -10,8 +10,8 @@ func TestPickRandomVertext(T *testing.T) {
 	_ = graph.AddEdge("c", "d", nil)
 	_ = graph.AddEdge("d", "e", nil)
 
-	v, _ := graph.PickRandomVertex(nil)
-	T.Log("==", string(v), "==")
+	v, _ := graph.PickRandomVertices(1, nil)
+	T.Log("==", string(v[0]), "==")
 }
 
 func TestInsertAndRead(T *testing.T) {

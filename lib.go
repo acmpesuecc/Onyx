@@ -8,12 +8,15 @@ import (
 	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/ristretto/z"
 	"math/rand"
+	"time"
 )
 
 // TODO: Add Label support for edgess
 type Graph struct {
 	DB *badger.DB
 }
+
+const allVerticesKey = "all_vertices"
 
 func NewGraph(path string, inMemory bool) (*Graph, error) {
 	var db *badger.DB
@@ -77,6 +80,8 @@ func (g *Graph) AddEdge(from string, to string, txn *badger.Txn) error {
 		}
 	}
 
+	go g.updateVertexList(nil, []string{from, to})
+
 	return nil
 }
 
@@ -137,16 +142,16 @@ func (g *Graph) GetEdges(from string, txn *badger.Txn) (map[string]bool, error) 
 		return nil, err
 	}
 
+	valCopy, err := item.ValueCopy(nil)
+	if err != nil {
+		return nil, err
+	}
+
 	if localTxn {
 		err = txn.Commit()
 		if err != nil {
 			return nil, err
 		}
-	}
-
-	valCopy, err := item.ValueCopy(nil)
-	if err != nil {
-		return nil, err
 	}
 
 	neighbors, err := deserializeEdgeMap(valCopy)
@@ -198,13 +203,36 @@ func (g *Graph) IterAllEdges(f func(src string, dst string) error, prefetchSize 
 	if localTxn {
 		err := txn.Commit()
 		if err != nil {
-			return nil
+			return err
 		}
 	}
 	return nil
 }
 
-func (g *Graph) PickRandomVertex(txn *badger.Txn) (string, error) {
+func (g *Graph) PickRandomVertices(num int, txn *badger.Txn) ([]string, error) {
+	localTxn := txn == nil
+	if localTxn {
+		txn = g.DB.NewTransaction(false)
+		defer txn.Discard()
+	}
+
+	vertices, err := g.GetEdges(allVerticesKey, txn)
+	if err != nil {
+		return nil, err
+	}
+
+	if localTxn {
+		err := txn.Commit()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	randomVertices := PickNRandomKeys(vertices, num)
+	return randomVertices, nil
+}
+
+func (g *Graph) PickRandomVertexLegacy(txn *badger.Txn) (string, error) {
 	localTxn := txn == nil
 	if localTxn {
 		txn = g.DB.NewTransaction(false)
@@ -228,7 +256,7 @@ func (g *Graph) PickRandomVertex(txn *badger.Txn) (string, error) {
 	if localTxn {
 		err := txn.Commit()
 		if err != nil {
-			return "", nil
+			return "", err
 		}
 	}
 
@@ -291,4 +319,87 @@ func deserializeEdgeMap(serializedMap []byte) (map[string]bool, error) {
 	// Decoding the serialized data
 	err := d.Decode(&deserializedMap)
 	return deserializedMap, err
+}
+
+// Add or update the vertex in the all-vertices list
+func (g *Graph) updateVertexList(txn *badger.Txn, verticesToAdd []string) error {
+	localTxn := txn == nil
+	if localTxn {
+		txn = g.DB.NewTransaction(true)
+		defer txn.Discard()
+	}
+
+	item, err := txn.Get([]byte(allVerticesKey))
+	var vertices map[string]bool
+
+	if err == badger.ErrKeyNotFound {
+		vertices = make(map[string]bool)
+	} else if err == nil {
+		valCopy, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		vertices, err = deserializeEdgeMap(valCopy)
+		if err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+
+	vListChanged := false
+	for _, vertex := range verticesToAdd {
+		// Add the vertex to the map if it doesn’t already exist
+		if _, exists := vertices[vertex]; !exists {
+			vertices[vertex] = true
+			vListChanged = true
+		}
+	}
+	if !vListChanged {
+		return nil //no changes to persist
+	}
+
+	serializedVertices, err := serializeEdgeMap(vertices)
+	if err != nil {
+		return err
+	}
+	err = txn.Set([]byte(allVerticesKey), serializedVertices)
+	if err != nil {
+		return err
+	}
+
+	if localTxn {
+		err := txn.Commit()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// PickNRandomKeys picks n unique random keys from the map using reservoir sampling.
+func PickNRandomKeys(m map[string]bool, n int) []string {
+	keys := make([]string, 0, n)
+	i := 0
+
+	// Seed the random number generator
+	rand.Seed(time.Now().UnixNano())
+
+	for key := range m {
+		if i < n {
+			// Directly add the first n keys
+			keys = append(keys, key)
+		} else {
+			// Randomly replace elements in the reservoir with decreasing probability
+			j := rand.Intn(i + 1)
+			if j < n {
+				keys[j] = key
+			}
+		}
+		i++
+	}
+
+	// If there are fewer than n keys in the map, just return them
+	return keys
 }
